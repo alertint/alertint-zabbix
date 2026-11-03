@@ -144,7 +144,7 @@ $pull_form = (new CForm())
 						->setId('alertint-pull-url')
 						->setWidth(ZBX_TEXTAREA_STANDARD_WIDTH)
 						->setAttribute('placeholder', 'https://zabbix.example.com'),
-					(new CDiv(_('Where the agent host opens this Zabbix frontend. Often the same as {$ZABBIX_URL}; on the same host, http://127.0.0.1 works too.')))
+					(new CDiv(_('Where the agent host opens this Zabbix frontend: usually the address you use in the browser. On the same host, the same path on 127.0.0.1 also works. The installer checks it.')))
 						->addClass('ai-hint')
 				])
 			])
