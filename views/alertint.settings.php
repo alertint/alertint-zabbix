@@ -133,6 +133,37 @@ $test_form = (new CForm())
 			))->setId('alertint-test-result'))])
 	);
 
+$pull_form = (new CForm())
+	->setId('alertint-pull')
+	->addItem(
+		(new CFormGrid())
+			->addItem([
+				new CLabel(_('Zabbix address for the agent'), 'alertint-pull-url'),
+				new CFormField([
+					(new CTextBox('pull_url', $connect['zabbix_url'], false, 2048))
+						->setId('alertint-pull-url')
+						->setWidth(ZBX_TEXTAREA_STANDARD_WIDTH)
+						->setAttribute('placeholder', 'https://zabbix.example.com'),
+					(new CDiv(_('Where the agent host opens this Zabbix frontend. Often the same as {$ZABBIX_URL}; on the same host, http://127.0.0.1 works too.')))
+						->addClass('ai-hint')
+				])
+			])
+			->addItem(
+				new CFormActions(
+					(new CSubmit('pull', _('Create read access')))
+						->setId('alertint-pull-run')
+						->setEnabled($connect['connected']),
+					[(new CSimpleButton(_('Check')))
+						->setId('alertint-pull-check')
+						->addClass(ZBX_STYLE_BTN_ALT)
+						->setEnabled($connect['connected'])]
+				)
+			)
+			->addItem([null, new CFormField((new CDiv(
+				$connect['connected'] ? '' : _('Press Connect first: this uses the service user it creates.')
+			))->setId('alertint-pull-result'))])
+	);
+
 (new CHtmlPage())
 	->setTitle(_('AlertINT · Settings'))
 	->addItem((new CTag('h4', true, _('1. Agent')))->addClass('ai-section'))
@@ -147,13 +178,20 @@ $test_form = (new CForm())
 		_('Raises "AlertINT test problem" on the host "AlertINT test", the same way any trigger fires, and follows it until AlertINT files it under a Situation with a finding, then resolves it again. AlertINT investigates it like a real problem, so it uses one analysis on your model. "Resolve test problem" closes it by hand if a test is interrupted.')
 	))->addClass('ai-intro'))
 	->addItem($test_form)
+	->addItem((new CTag('h4', true, _('4. Let AlertINT read Zabbix (optional)')))->addClass('ai-section'))
+	->addItem((new CDiv(
+		_('Lets AlertINT read item history, other open problems and host details while it investigates. Creates the role "AlertINT read-only API" (API only, read methods only) for the service user and an API token, then gives you one command to run on the agent host. Pressing it again replaces the token.')
+	))->addClass('ai-intro'))
+	->addItem($pull_form)
 	->show();
 ?>
 <style>
 .ai-hint { color: #768d99; margin-top: 4px; max-width: 640px; line-height: 1.4; }
 .ai-section { margin: 18px 0 6px; font-size: 14px; }
 .ai-intro { color: #768d99; max-width: 760px; line-height: 1.5; margin-bottom: 8px; }
-#alertint-connect-result:empty, #alertint-test-result:empty { display: none; }
+#alertint-connect-result:empty, #alertint-test-result:empty, #alertint-pull-result:empty { display: none; }
+#alertint-pull-result { max-width: 760px; }
+.ai-cmd { background: #1f2c33; color: #f2f4f5; padding: 10px 12px; border-radius: 3px; white-space: pre-wrap; word-break: break-all; font-family: monospace; margin: 6px 0; }
 #alertint-test-result { max-width: 760px; }
 .ai-state.done { background: #dff5e7; color: #2a7d4a; }
 .ai-state.wait { background: #f4f6f7; color: #768d99; }
@@ -179,7 +217,9 @@ $test_form = (new CForm())
 		'alertint.settings.update': <?= json_encode(CCsrfTokenHelper::get('alertint.settings.update')) ?>,
 		'alertint.settings.test': <?= json_encode(CCsrfTokenHelper::get('alertint.settings.test')) ?>,
 		'alertint.connect.run': <?= json_encode(CCsrfTokenHelper::get('alertint.connect.run')) ?>,
-		'alertint.test.run': <?= json_encode(CCsrfTokenHelper::get('alertint.test.run')) ?>
+		'alertint.test.run': <?= json_encode(CCsrfTokenHelper::get('alertint.test.run')) ?>,
+		'alertint.pull.run': <?= json_encode(CCsrfTokenHelper::get('alertint.pull.run')) ?>,
+		'alertint.pull.check': <?= json_encode(CCsrfTokenHelper::get('alertint.pull.check')) ?>
 	};
 	const form = document.getElementById('alertint-settings');
 	const result = document.getElementById('alertint-result');
@@ -271,7 +311,10 @@ $test_form = (new CForm())
 			connectButton.value = 'Connect again';
 			raiseButton.disabled = false;
 			resolveButton.disabled = false;
+			pullButton.disabled = false;
+			pullCheck.disabled = false;
 			if (testResult.textContent.startsWith('Press Connect first')) testResult.innerHTML = '';
+			if (pullResult.textContent.startsWith('Press Connect first')) pullResult.innerHTML = '';
 		}
 	});
 
@@ -340,5 +383,46 @@ $test_form = (new CForm())
 
 	testForm.addEventListener('submit', (e) => { e.preventDefault(); runTest(1); });
 	resolveButton.addEventListener('click', () => runTest(0));
+
+	// Read access: role + token, then the one command for the agent host.
+	const pullForm = document.getElementById('alertint-pull');
+	const pullUrl = document.getElementById('alertint-pull-url');
+	const pullResult = document.getElementById('alertint-pull-result');
+	const pullButton = document.getElementById('alertint-pull-run');
+	const pullCheck = document.getElementById('alertint-pull-check');
+	if (!pullUrl.value) pullUrl.value = zabbixUrl.value;
+
+	pullForm.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		pullButton.disabled = true;
+		pullResult.innerHTML = '<div class="ai-hint">Creating read access…</div>';
+		const res = await post('alertint.pull.run', {zabbix_url: pullUrl.value.trim()});
+		pullButton.disabled = false;
+		const steps = res.steps || [{step: 'Stopped', state: 'failed', detail: res.error || 'No answer.'}];
+		pullResult.innerHTML = stepsTable(steps) + (res.ok
+			? '<div class="ai-hint" style="margin-top:10px">Run this on the agent host. It keeps your agent, tokens and settings, and turns on reading Zabbix. The token is shown only now.</div>'
+				+ '<pre class="ai-cmd" id="alertint-pull-cmd">' + esc(res.command) + '</pre>'
+				+ '<button type="button" class="btn-alt" id="alertint-pull-copy">Copy</button>'
+				+ ' <span class="ai-hint">Then press Check.</span>'
+			: '');
+		const copy = document.getElementById('alertint-pull-copy');
+		if (copy) copy.addEventListener('click', async () => {
+			try { await navigator.clipboard.writeText(res.command); copy.textContent = 'Copied'; }
+			catch (err) { copy.textContent = 'Select the text and copy it'; }
+		});
+	});
+
+	pullCheck.addEventListener('click', async () => {
+		const old = document.getElementById('alertint-pull-check-result');
+		if (old) old.remove();
+		const box = document.createElement('div');
+		box.id = 'alertint-pull-check-result';
+		box.className = 'ai-hint';
+		box.textContent = 'Asking the agent…';
+		pullResult.appendChild(box);
+		const res = await post('alertint.pull.check', {});
+		box.innerHTML = '<span class="ai-state ' + (res.state === 'on' ? 'ok' : 'failed') + '">'
+			+ esc(res.state || 'failed') + '</span> ' + esc(res.detail || res.error || 'No answer.');
+	});
 })();
 </script>

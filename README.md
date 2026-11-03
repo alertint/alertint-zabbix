@@ -23,7 +23,7 @@ Zabbix frontend  ◀──── MCP :9912 ────  AlertINT agent
 |---|---|---|
 | **AlertINT → Situations** | Every Zabbix user | Live Situations: the finding, the Zabbix problems it groups, and the timeline. |
 | **AlertINT → Status** | Every Zabbix user | Whether the agent is reachable, and its last 24 h: alerts, analyses, LLM calls, tokens per model. |
-| **AlertINT → Settings** | Super admins | Agent address and token, **Connect**, and **Send test problem**. |
+| **AlertINT → Settings** | Super admins | Agent address and token, **Connect**, **Send test problem**, and **Create read access**. |
 
 ## Requirements
 
@@ -90,7 +90,7 @@ An **AlertINT** section appears in the main menu, after **Monitoring**.
 
 ## Set up
 
-Open **AlertINT → Settings** as a Super admin. Do the three sections in order.
+Open **AlertINT → Settings** as a Super admin. Do sections 1 to 3 in order; section 4 is optional.
 
 ### 1. Agent
 
@@ -142,6 +142,30 @@ Then it resolves the problem and follows the recovery.
 
 > The test is a real analysis, so it uses one call on your model.
 
+### 4. Let AlertINT read Zabbix (optional)
+
+With read access, AlertINT also reads item history, other open problems and host details while it investigates.
+
+1. Check **Zabbix address for the agent**: where the agent host opens this frontend, e.g. `https://zabbix.example.com`.
+2. Press **Create read access**. It creates or updates:
+
+   | Object | Name | Purpose |
+   |---|---|---|
+   | User role | `AlertINT read-only API` | API only, and only `event.get`, `history.get`, `host.get`, `hostgroup.get`, `item.get`, `problem.get`, `trend.get`, `trigger.get`. Zabbix enforces it. |
+   | User | `alertint-svc` | Gets that role. It reads the host groups Connect gave it. |
+   | API token | `AlertINT read-only API` | No expiry. Pressing the button again replaces it. |
+
+3. Run the command it prints on the **agent host**:
+
+   ```sh
+   curl -fsSL https://alertint.com/zabbix/install.sh | ZABBIX_URL='https://zabbix.example.com' ZABBIX_API_TOKEN='…' sh
+   ```
+
+   The installer keeps the agent, its tokens and `config.yaml`, turns on the Zabbix API (old file kept as `config.yaml.bak`), and checks that the token can read hosts.
+4. Press **Check**. The agent reads the open problems on `AlertINT test` with the token: the same path an investigation uses.
+
+> The token is shown once and never stored by the module. Agent not installed with `install.sh`? Put the token in the agent's environment and set `zabbix.api` in its config ([docs](https://alertint.com/docs/integrations/zabbix#pull-the-zabbix-context-zabbixapi)).
+
 ## Troubleshooting
 
 | You see | Do this |
@@ -154,12 +178,15 @@ Then it resolves the problem and follows the recovery.
 | Test: *has not loaded the test host yet* | The Zabbix server picks up new hosts within a minute. Try again shortly. |
 | Test stops at *Sent by Zabbix* | Zabbix's own error is shown. Also check **Reports → Action log**. |
 | Problems on some hosts never reach AlertINT | Their host group was added after Connect. Press **Connect again**. |
+| Check: *does not read Zabbix yet* | Run the command from **Create read access** on the agent host. |
+| Check fails with *Not authorized* or *session* | Wrong token, or Apache drops the `Authorization` header: add `CGIPassAuth On` to the Zabbix Apache config. |
 | An old Situation picks up a new test after you rebuilt Zabbix | Event ids restarted. Set a new `zabbix.instance_id` in `/etc/alertint/config.yaml`, then run `sudo systemctl restart alertint`. |
 
 ## Security
 
 - The **MCP token** is stored in the module's config in the Zabbix database. Super admins can read it through the API.
 - The **webhook token** is stored only in the `AlertINT` media type.
+- The **read-access token** is shown once and kept only by Zabbix and the agent (`/etc/alertint/alertint.env`). Its role allows read methods only.
 - The service user `alertint-svc` cannot log in to the frontend.
 - Settings, Connect and the test are **Super admin only**, and every change is CSRF-protected.
 
@@ -172,6 +199,7 @@ Then it resolves the problem and follows the recovery.
    - user group `AlertINT service`
    - media type `AlertINT`
    - host `AlertINT test` and host group `AlertINT`
+   - API token and user role `AlertINT read-only API` (delete the user first)
    - global macro `{$ZABBIX_URL}`, if nothing else uses it
 
 ## License

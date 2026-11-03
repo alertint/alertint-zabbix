@@ -3,7 +3,7 @@
 	"id": "alertint",
 	"name": "AlertINT",
 	"namespace": "AlertINT",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"author": "AlertINT",
 	"url": "https://alertint.com",
 	"description": "AlertINT Situations inside Zabbix: correlated problems, the investigated finding, and its history. Reads a self-hosted AlertINT agent over MCP.",
@@ -49,6 +49,14 @@
 		},
 		"alertint.test.status": {
 			"class": "TestStatus",
+			"layout": "layout.json"
+		},
+		"alertint.pull.run": {
+			"class": "PullRun",
+			"layout": "layout.json"
+		},
+		"alertint.pull.check": {
+			"class": "PullCheck",
 			"layout": "layout.json"
 		}
 	},

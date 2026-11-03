@@ -20,6 +20,9 @@ use Exception;
  *   5. User "alertint-svc" with the AlertINT media
  *   6. Trigger action "Send to AlertINT"
  *   7. Webhook check from the Zabbix server (no alert is created)
+ *
+ * pull() is the separate, optional "read access" button: role + API token for
+ * the same service user, so the agent can read Zabbix.
  */
 class Connector {
 
@@ -33,6 +36,14 @@ class Connector {
 	public const USER = 'alertint-svc';
 	public const ACTION = 'Send to AlertINT';
 	public const ZABBIX_URL_MACRO = '{$ZABBIX_URL}';
+
+	public const ROLE = 'AlertINT read-only API';
+	public const PULL_TOKEN = 'AlertINT read-only API';
+	public const INSTALLER_URL = 'https://alertint.com/zabbix/install.sh';
+
+	/** Every Zabbix API method the agent calls (apiinfo.version needs no auth). */
+	public const PULL_METHODS = ['event.get', 'history.get', 'host.get', 'hostgroup.get', 'item.get',
+		'problem.get', 'trend.get', 'trigger.get'];
 
 	private const TOKEN_PLACEHOLDER = 'REPLACE-WITH-YOUR-ALERTINT_ZABBIX_WEBHOOK_TOKEN';
 
@@ -70,6 +81,109 @@ class Connector {
 		}
 
 		return $this->steps;
+	}
+
+	/**
+	 * Read access for the agent: the service user "alertint-svc" gets a role that
+	 * allows only the read methods AlertINT calls, and a fresh API token. Its read
+	 * rights are the service group's (every host group, kept by Connect).
+	 * Returns [steps, token]; the token is shown once and never stored here.
+	 */
+	public function pull(): array {
+		$token = null;
+
+		try {
+			$user = self::one(self::call(API::User()->get([
+				'output' => ['userid', 'roleid'], 'filter' => ['username' => self::USER]
+			])));
+
+			if ($user === null) {
+				throw new Exception(_('Press Connect first: it creates the service user "alertint-svc" this uses.'));
+			}
+
+			$roleid = $this->pullRole();
+
+			if ($user['roleid'] != $roleid) {
+				self::call(API::User()->update(['userid' => $user['userid'], 'roleid' => $roleid]));
+				$this->add('User "'.self::USER.'"', 'updated', 'Now has the role "'.self::ROLE.'".');
+			}
+			else {
+				$this->add('User "'.self::USER.'"', 'unchanged', 'Has the role "'.self::ROLE.'".');
+			}
+
+			$old = self::call(API::Token()->get([
+				'output' => ['tokenid'], 'userids' => [$user['userid']], 'filter' => ['name' => self::PULL_TOKEN]
+			]));
+
+			if ($old) {
+				self::call(API::Token()->delete(array_column($old, 'tokenid')));
+			}
+
+			$tokenid = self::call(API::Token()->create([
+				'name' => self::PULL_TOKEN,
+				'userid' => $user['userid'],
+				'description' => 'Used by the AlertINT agent to read Zabbix. Made in AlertINT → Settings; pressing the button again replaces it.',
+				'expires_at' => 0
+			]))['tokenids'][0];
+			$token = self::call(API::Token()->generate([$tokenid]))[0]['token'];
+			$this->add('API token "'.self::PULL_TOKEN.'"', $old ? 'updated' : 'created',
+				$old ? 'New token made; the old one no longer works.' : 'Token made for "'.self::USER.'". No expiry.'
+			);
+		}
+		catch (Exception $e) {
+			$this->steps[] = ['step' => 'Stopped', 'state' => 'failed', 'detail' => $e->getMessage()];
+		}
+
+		return [$this->steps, $token];
+	}
+
+	private function pullRole(): string {
+		// Zabbix requires at least one frontend page per role. The service group has
+		// frontend login disabled, so the dashboard is never actually reachable.
+		$rules = [
+			'ui' => [['name' => 'monitoring.dashboard', 'status' => 1]],
+			'ui.default_access' => 0,
+			'modules.default_access' => 0,
+			'actions.default_access' => 0,
+			'api.access' => 1,
+			'api.mode' => 1,
+			'api' => self::PULL_METHODS
+		];
+
+		$role = self::one(self::call(API::Role()->get([
+			'output' => ['roleid', 'type'], 'filter' => ['name' => self::ROLE], 'selectRules' => ['api', 'api.access', 'api.mode']
+		])));
+
+		if ($role === null) {
+			$roleid = self::call(API::Role()->create([
+				'name' => self::ROLE, 'type' => USER_TYPE_ZABBIX_USER, 'rules' => $rules
+			]))['roleids'][0];
+			$this->add('Role "'.self::ROLE.'"', 'created', 'API only, and only: '.implode(', ', self::PULL_METHODS).'.');
+
+			return $roleid;
+		}
+
+		$api = $role['rules']['api'] ?? [];
+		sort($api);
+
+		if ($role['type'] == USER_TYPE_ZABBIX_USER && $api === self::PULL_METHODS
+				&& $role['rules']['api.access'] == 1 && $role['rules']['api.mode'] == 1) {
+			$this->add('Role "'.self::ROLE.'"', 'unchanged', 'API only, read methods only.');
+		}
+		else {
+			self::call(API::Role()->update(['roleid' => $role['roleid'], 'type' => USER_TYPE_ZABBIX_USER, 'rules' => $rules]));
+			$this->add('Role "'.self::ROLE.'"', 'updated', 'Reset to API only, read methods only.');
+		}
+
+		return $role['roleid'];
+	}
+
+	/**
+	 * The command that gives the token to the agent: the installer, run again on
+	 * the agent host, keeps everything else and turns the Zabbix API on.
+	 */
+	public static function pullCommand(string $zabbix_url, string $token): string {
+		return 'curl -fsSL '.self::INSTALLER_URL.' | ZABBIX_URL=\''.$zabbix_url.'\' ZABBIX_API_TOKEN=\''.$token.'\' sh';
 	}
 
 	private function testHost(): void {
