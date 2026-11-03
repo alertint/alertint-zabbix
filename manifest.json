@@ -1,0 +1,60 @@
+{
+	"manifest_version": 2.0,
+	"id": "alertint",
+	"name": "AlertINT",
+	"namespace": "AlertINT",
+	"version": "0.1.0",
+	"author": "AlertINT",
+	"url": "https://alertint.com",
+	"description": "AlertINT Situations inside Zabbix: correlated problems, the investigated finding, and its history. Reads a self-hosted AlertINT agent over MCP.",
+	"actions": {
+		"alertint.situations": {
+			"class": "SituationsView",
+			"view": "alertint.situations",
+			"layout": "layout.htmlpage"
+		},
+		"alertint.situations.data": {
+			"class": "SituationsData",
+			"layout": "layout.json"
+		},
+		"alertint.status": {
+			"class": "StatusView",
+			"view": "alertint.status",
+			"layout": "layout.htmlpage"
+		},
+		"alertint.status.data": {
+			"class": "StatusData",
+			"layout": "layout.json"
+		},
+		"alertint.settings": {
+			"class": "SettingsView",
+			"view": "alertint.settings",
+			"layout": "layout.htmlpage"
+		},
+		"alertint.settings.update": {
+			"class": "SettingsUpdate",
+			"layout": "layout.json"
+		},
+		"alertint.settings.test": {
+			"class": "SettingsTest",
+			"layout": "layout.json"
+		},
+		"alertint.connect.run": {
+			"class": "ConnectRun",
+			"layout": "layout.json"
+		},
+		"alertint.test.run": {
+			"class": "TestRun",
+			"layout": "layout.json"
+		},
+		"alertint.test.status": {
+			"class": "TestStatus",
+			"layout": "layout.json"
+		}
+	},
+	"config": {
+		"mcp_url": "",
+		"mcp_token": "",
+		"webhook_url": ""
+	}
+}
